@@ -4,6 +4,7 @@ import json
 import imp
 import traceback
 import sys
+import signal
 
 
 CHANNEL_IN = 3
@@ -14,11 +15,15 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
 
 def readlen(f, n):
-    data = ''
-    while len(data) < n:
-        data += f.read(n - len(data))
+    buffer = ''
+    while len(buffer) < n:
+        data = f.read(n - len(buffer))
+        if data == '':
+            raise Exception('EOF')
 
-    return data
+        buffer += data
+
+    return buffer
 
 
 def get_next_call(chan_in):
@@ -61,6 +66,9 @@ def run(module):
     # open channel files
     chan_in = os.fdopen(CHANNEL_IN, 'r')
     chan_out = os.fdopen(CHANNEL_OUT, 'w')
+
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGINT):
+        signal.signal(s, sys.exit)
 
     mod = imp.load_module(module, *imp.find_module(module))
     try:
