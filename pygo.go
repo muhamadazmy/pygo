@@ -2,5 +2,6 @@ package pygo
 
 type Pygo interface {
 	Error() string
-	Do(fnc string, kwargs map[string]interface{}) (interface{}, error)
+	Apply(fnc string, kwargs map[string]interface{}) (interface{}, error)
+	Call(fnc string, args ...interface{}) (interface{}, error)
 }

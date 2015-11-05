@@ -151,6 +151,7 @@ func (py *pygoImpl) processSingle() {
 
 	data := map[string]interface{}{
 		"function": c.function,
+		"args":     c.args,
 		"kwargs":   c.kwargs,
 	}
 
@@ -172,14 +173,17 @@ func (py *pygoImpl) process() {
 	}
 }
 
-func (py *pygoImpl) Do(function string, kwargs map[string]interface{}) (interface{}, error) {
+func (py *pygoImpl) call(function string, args []interface{}, kwargs map[string]interface{}) (interface{}, error) {
 	if py.state != nil {
 		return nil, fmt.Errorf("Can't execute python code, python process has exited", py.stderr)
 	}
 
 	responseChan := make(chan *response)
+	defer close(responseChan)
+
 	call := call{
 		function: function,
+		args:     args,
 		kwargs:   kwargs,
 		response: responseChan,
 	}
@@ -197,4 +201,12 @@ func (py *pygoImpl) Do(function string, kwargs map[string]interface{}) (interfac
 	}
 
 	return responseMap["return"], nil
+}
+
+func (py *pygoImpl) Apply(function string, kwargs map[string]interface{}) (interface{}, error) {
+	return py.call(function, nil, kwargs)
+}
+
+func (py *pygoImpl) Call(function string, args ...interface{}) (interface{}, error) {
+	return py.call(function, args, nil)
 }
