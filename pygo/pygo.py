@@ -66,10 +66,10 @@ class Runner(object):
             result = {
                 'return': call_result
             }
-        except Exception, e:
+        except:
             result = {
                 'state': 'ERROR',
-                'return': str(e)
+                'return': traceback.format_exc()
             }
 
         return result
