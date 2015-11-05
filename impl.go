@@ -1,9 +1,7 @@
 package pygo
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -11,9 +9,9 @@ import (
 )
 
 const (
-	binary = "python2.7"
-	//code   = "import pygo; pygo.wrap('%s')"
-	code = "import os; f = os.fdopen(4, 'w').write('%s')"
+	PythonBinary = "python2.7"
+	code         = "import pygo; pygo.run('%s')"
+	//code = "import os, struct; f = os.fdopen(4, 'w').write(struct.pack('>I13s', 13, '\"hello world\"')); print '%s'"
 )
 
 type response struct {
@@ -23,7 +21,8 @@ type response struct {
 
 type call struct {
 	function string
-	args     map[string]interface{}
+	args     []interface{}
+	kwargs   map[string]interface{}
 	response chan *response
 }
 
@@ -32,8 +31,7 @@ type pygoImpl struct {
 	module  string
 	ps      *os.Process
 
-	chanin  *os.File
-	chanout *os.File
+	stream  Stream
 	chanerr *os.File
 
 	//only filled if process exited.
@@ -44,7 +42,7 @@ type pygoImpl struct {
 }
 
 func NewPy(module string) (Pygo, error) {
-	path, err := exec.LookPath(binary)
+	path, err := exec.LookPath(PythonBinary)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +99,7 @@ func (py *pygoImpl) init() error {
 	}
 
 	ps, err := os.StartProcess(py.binPath, []string{
-		binary,
+		PythonBinary,
 		"-c",
 		fmt.Sprintf(code, py.module)},
 		attr)
@@ -111,8 +109,7 @@ func (py *pygoImpl) init() error {
 	}
 
 	py.ps = ps
-	py.chanin = goOut
-	py.chanout = goIn
+	py.stream = NewStream(goOut, goIn)
 	py.chanerr = stderrReader
 
 	return nil
@@ -133,31 +130,19 @@ func (py *pygoImpl) processSingle() {
 
 	data := map[string]interface{}{
 		"function": c.function,
-		"args":     c.args,
+		"kwargs":   c.kwargs,
 	}
 
-	bytes, err := json.Marshal(data)
+	err := py.stream.Write(data)
 	if err != nil {
 		response.err = err
 		return
 	}
-
-	n, err := py.chanin.Write(bytes)
-	if err != nil {
-		response.err = err
-		return
-	}
-
 	//read response.
-	buffer := make([]byte, 1000)
-	n, err = py.chanout.Read(buffer)
+	value, err := py.stream.Read()
 
-	if err != nil && err != io.EOF {
-		response.err = err
-		return
-	}
-
-	response.value = buffer[:n]
+	response.value = value
+	response.err = err
 }
 
 func (py *pygoImpl) process() {
@@ -166,7 +151,7 @@ func (py *pygoImpl) process() {
 	}
 }
 
-func (py *pygoImpl) Do(function string, args map[string]interface{}) (interface{}, error) {
+func (py *pygoImpl) Do(function string, kwargs map[string]interface{}) (interface{}, error) {
 	if py.state != nil {
 		return nil, fmt.Errorf("Can't execute python code, python process has exited", py.stderr)
 	}
@@ -174,10 +159,21 @@ func (py *pygoImpl) Do(function string, args map[string]interface{}) (interface{
 	responseChan := make(chan *response)
 	call := call{
 		function: function,
-		args:     args,
+		kwargs:   kwargs,
 		response: responseChan,
 	}
 	py.channel <- &call
 	response := <-responseChan
-	return response.value, response.err
+	if response.err != nil {
+		return nil, response.err
+	}
+	responseMap := response.value.(map[string]interface{})
+
+	if state, ok := responseMap["state"]; ok {
+		if state.(string) == "ERROR" {
+			return nil, fmt.Errorf("%v", responseMap["return"])
+		}
+	}
+
+	return responseMap["return"], nil
 }
