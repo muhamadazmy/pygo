@@ -16,6 +16,17 @@ const (
 	code = "import os; f = os.fdopen(4, 'w').write('%s')"
 )
 
+type response struct {
+	value interface{}
+	err   error
+}
+
+type call struct {
+	function string
+	args     map[string]interface{}
+	response chan *response
+}
+
 type pygoImpl struct {
 	binPath string
 	module  string
@@ -28,6 +39,8 @@ type pygoImpl struct {
 	//only filled if process exited.
 	stderr string
 	state  *os.ProcessState
+
+	channel chan *call
 }
 
 func NewPy(module string) (Pygo, error) {
@@ -39,6 +52,7 @@ func NewPy(module string) (Pygo, error) {
 	py := &pygoImpl{
 		binPath: path,
 		module:  module,
+		channel: make(chan *call),
 	}
 
 	err = py.init()
@@ -47,6 +61,7 @@ func NewPy(module string) (Pygo, error) {
 	}
 
 	go py.wait()
+	go py.process()
 
 	return py, nil
 }
@@ -107,24 +122,30 @@ func (py *pygoImpl) Error() string {
 	return py.stderr
 }
 
-func (py *pygoImpl) Do(fnc string, args map[string]interface{}) (interface{}, error) {
-	if py.state != nil {
-		return nil, fmt.Errorf("Can't execute python code, python process has exited", py.stderr)
-	}
+func (py *pygoImpl) processSingle() {
+	c := <-py.channel
+
+	var response response
+
+	defer func() {
+		c.response <- &response
+	}()
 
 	data := map[string]interface{}{
-		"func": fnc,
-		"args": args,
+		"function": c.function,
+		"args":     c.args,
 	}
 
 	bytes, err := json.Marshal(data)
 	if err != nil {
-		return nil, err
+		response.err = err
+		return
 	}
 
 	n, err := py.chanin.Write(bytes)
 	if err != nil {
-		return nil, err
+		response.err = err
+		return
 	}
 
 	//read response.
@@ -132,9 +153,31 @@ func (py *pygoImpl) Do(fnc string, args map[string]interface{}) (interface{}, er
 	n, err = py.chanout.Read(buffer)
 
 	if err != nil && err != io.EOF {
-		return nil, err
+		response.err = err
+		return
 	}
-	//log.Println(n, buffer)
 
-	return string(buffer[:n]), nil
+	response.value = buffer[:n]
+}
+
+func (py *pygoImpl) process() {
+	for {
+		py.processSingle()
+	}
+}
+
+func (py *pygoImpl) Do(function string, args map[string]interface{}) (interface{}, error) {
+	if py.state != nil {
+		return nil, fmt.Errorf("Can't execute python code, python process has exited", py.stderr)
+	}
+
+	responseChan := make(chan *response)
+	call := call{
+		function: function,
+		args:     args,
+		response: responseChan,
+	}
+	py.channel <- &call
+	response := <-responseChan
+	return response.value, response.err
 }
