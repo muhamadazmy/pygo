@@ -9,9 +9,12 @@ import (
 )
 
 const (
-	PythonBinary = "python2.7"
-	code         = "import pygo; pygo.run('%s')"
-	//code = "import os, struct; f = os.fdopen(4, 'w').write(struct.pack('>I13s', 13, '\"hello world\"')); print '%s'"
+	code = "import pygo; pygo.run('%s')"
+)
+
+var (
+	PythonBinary string = "python2.7"
+	defaultOpts  PyOpts
 )
 
 type response struct {
@@ -29,6 +32,7 @@ type call struct {
 type pygoImpl struct {
 	binPath string
 	module  string
+	opts    *PyOpts
 	ps      *os.Process
 
 	stream  Stream
@@ -41,14 +45,24 @@ type pygoImpl struct {
 	channel chan *call
 }
 
-func NewPy(module string) (Pygo, error) {
+type PyOpts struct {
+	PythonPath string
+}
+
+func NewPy(module string, opts *PyOpts) (Pygo, error) {
+	if opts == nil {
+		opts = &defaultOpts
+	}
+
 	path, err := exec.LookPath(PythonBinary)
+
 	if err != nil {
 		return nil, err
 	}
 
 	py := &pygoImpl{
 		binPath: path,
+		opts:    opts,
 		module:  module,
 		channel: make(chan *call),
 	}
@@ -94,8 +108,15 @@ func (py *pygoImpl) init() error {
 		return err
 	}
 
+	var env []string = nil
+
+	if py.opts.PythonPath != "" {
+		env = []string{fmt.Sprintf("PYTHONPATH=%s", py.opts.PythonPath)}
+	}
+
 	attr := &os.ProcAttr{
 		Files: []*os.File{nil, nil, stderrWriter, pyIn, pyOut},
+		Env:   env,
 	}
 
 	ps, err := os.StartProcess(py.binPath, []string{

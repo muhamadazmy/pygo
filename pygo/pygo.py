@@ -3,8 +3,6 @@ import struct
 import json
 import imp
 import traceback
-import sys
-import signal
 
 
 CHANNEL_IN = 3
@@ -26,55 +24,63 @@ def readlen(f, n):
     return buffer
 
 
-def get_next_call(chan_in):
-    header = readlen(chan_in, HEADER_SIZE)
-    length = struct.unpack(HEADER_FMT, header)[0]
+class Runner(object):
+    def __init__(self, module):
+        self.module = module
 
-    data = readlen(chan_in, length)
+        # open channel files
+        self.chan_in = os.fdopen(CHANNEL_IN, 'r')
+        self.chan_out = os.fdopen(CHANNEL_OUT, 'w')
 
-    return json.loads(data)
+        self.mod = None
 
+    def get_next_call(self):
+        header = readlen(self.chan_in, HEADER_SIZE)
+        length = struct.unpack(HEADER_FMT, header)[0]
 
-def do_call(module, call):
-    func_name = call['function']
-    args = call['kwargs']
+        data = readlen(self.chan_in, length)
 
-    result = {}
-    try:
-        func = getattr(module, func_name)
-        call_result = func(**args)
-        result = {
-            'return': call_result
-        }
-    except Exception, e:
-        result = {
-            'state': 'ERROR',
-            'return': str(e)
-        }
+        return json.loads(data)
 
-    return result
+    def send_result(self, result):
+        data = json.dumps(result)
+        self.chan_out.write(struct.pack(HEADER_FMT, len(data)))
+        self.chan_out.write(data)
+        self.chan_out.flush()
 
+    def get_module(self):
+        if self.mod is None:
+            self.mod = imp.load_module(self.module, *imp.find_module(self.module))
 
-def send_result(chan_out, result):
-    data = json.dumps(result)
-    chan_out.write(struct.pack(HEADER_FMT, len(data)))
-    chan_out.write(data)
-    chan_out.flush()
+        return self.mod
 
+    def do_call(self, call):
+        module = self.get_module()
+        func_name = call['function']
+        args = call['kwargs']
 
-def run(module):
-    # open channel files
-    chan_in = os.fdopen(CHANNEL_IN, 'r')
-    chan_out = os.fdopen(CHANNEL_OUT, 'w')
+        result = {}
+        try:
+            func = getattr(module, func_name)
+            call_result = func(**args)
+            result = {
+                'return': call_result
+            }
+        except Exception, e:
+            result = {
+                'state': 'ERROR',
+                'return': str(e)
+            }
 
-    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGQUIT, signal.SIGINT):
-        signal.signal(s, sys.exit)
+        return result
 
-    mod = imp.load_module(module, *imp.find_module(module))
-    try:
+    def run(self):
         while True:
-            call = get_next_call(chan_in)
-            result = do_call(mod, call)
-            send_result(chan_out, result)
-    except:
-        traceback.print_exc(file=sys.stderr)
+            result = {'state': 'ERROR'}
+            try:
+                call = self.get_next_call()
+                result = self.do_call(call)
+            except:
+                result['return'] = traceback.format_exc()
+            finally:
+                self.send_result(result)

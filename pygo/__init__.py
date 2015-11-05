@@ -1,1 +1,5 @@
-from .pygo import run # NOQA
+from .pygo import Runner
+
+
+def run(module):
+    Runner(module).run()
