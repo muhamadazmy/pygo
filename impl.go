@@ -47,6 +47,7 @@ type pygoImpl struct {
 
 type PyOpts struct {
 	PythonPath string
+	Env        []string
 }
 
 func NewPy(module string, opts *PyOpts) (Pygo, error) {
@@ -113,6 +114,8 @@ func (py *pygoImpl) init() error {
 	if py.opts.PythonPath != "" {
 		env = []string{fmt.Sprintf("PYTHONPATH=%s", py.opts.PythonPath)}
 	}
+
+	env = append(env, py.opts.Env...)
 
 	attr := &os.ProcAttr{
 		Files: []*os.File{nil, nil, stderrWriter, pyIn, pyOut},
