@@ -89,6 +89,7 @@ func (py *pygoImpl) wait() {
 
 	state, _ := py.ps.Wait()
 	py.state = state
+	py.stream.Close()
 }
 
 //init opes the pipes and start the python process.
@@ -163,6 +164,7 @@ func (py *pygoImpl) processSingle() {
 		response.err = err
 		return
 	}
+	log.Println("Read response")
 	//read response.
 	value, err := py.stream.Read()
 
