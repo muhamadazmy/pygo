@@ -207,7 +207,7 @@ func (py *pygoImpl) process() {
 
 func (py *pygoImpl) call(function string, args []interface{}, kwargs map[string]interface{}) (interface{}, error) {
 	if py.state != nil {
-		return nil, fmt.Errorf("Can't execute python code, python process has exited", py.stderr)
+		return nil, fmt.Errorf("Can't execute python code, python process has exited")
 	}
 
 	responseChan := make(chan *response)
@@ -241,4 +241,8 @@ func (py *pygoImpl) Apply(function string, kwargs map[string]interface{}) (inter
 
 func (py *pygoImpl) Call(function string, args ...interface{}) (interface{}, error) {
 	return py.call(function, args, nil)
+}
+
+func (py *pygoImpl) Close() {
+	py.ps.Kill()
 }
