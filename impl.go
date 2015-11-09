@@ -1,8 +1,9 @@
 package pygo
 
 import (
+	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -73,23 +74,40 @@ func NewPy(module string, opts *PyOpts) (Pygo, error) {
 		return nil, err
 	}
 
+	//read handshake message.
+	//TODO: inspect the response for protocol version
+	_, err = py.stream.Read()
+	if err != nil {
+		py.wait()
+		return nil, fmt.Errorf(py.stderr)
+	}
+
 	go py.wait()
+	//start processing calls.
 	go py.process()
 
 	return py, nil
 }
 
-func (py *pygoImpl) wait() {
-	data, err := ioutil.ReadAll(py.chanerr)
-	if err != nil {
+func (py *pygoImpl) readProcessError() {
+	var buffer bytes.Buffer
+	_, err := io.Copy(&buffer, py.chanerr)
+
+	if err != nil && err != io.EOF {
 		log.Println(err)
 	}
 
-	py.stderr = string(data)
+	py.stderr = buffer.String()
+}
+
+func (py *pygoImpl) wait() {
+	py.readProcessError()
 
 	state, _ := py.ps.Wait()
 	py.state = state
+	py.ps.Release()
 	py.stream.Close()
+	py.chanerr.Close()
 }
 
 //init opes the pipes and start the python process.
@@ -129,6 +147,12 @@ func (py *pygoImpl) init() error {
 		fmt.Sprintf(code, py.module)},
 		attr)
 
+	defer func() {
+		stderrWriter.Close()
+		pyIn.Close()
+		pyOut.Close()
+	}()
+
 	if err != nil {
 		return err
 	}
@@ -161,12 +185,15 @@ func (py *pygoImpl) processSingle() {
 
 	err := py.stream.Write(data)
 	if err != nil {
-		response.err = err
+		//log.Println("Write error", err)
+		response.err = fmt.Errorf("Failed to send call to python: %s", err)
 		return
 	}
-	log.Println("Read response")
 	//read response.
 	value, err := py.stream.Read()
+	if err != nil {
+		err = fmt.Errorf("Failed to read response from python: %s", err)
+	}
 
 	response.value = value
 	response.err = err
@@ -201,7 +228,7 @@ func (py *pygoImpl) call(function string, args []interface{}, kwargs map[string]
 
 	if state, ok := responseMap["state"]; ok {
 		if state.(string) == "ERROR" {
-			return nil, fmt.Errorf("%v", responseMap["return"])
+			return nil, fmt.Errorf("Exception: %v", responseMap["return"])
 		}
 	}
 
