@@ -3,12 +3,14 @@ package pygo
 import (
 	"encoding/binary"
 	"encoding/json"
+	"io"
 	"os"
 )
 
 type Stream interface {
 	Write(interface{}) error
 	Read() (interface{}, error)
+	Close()
 }
 
 type streamImpl struct {
@@ -48,17 +50,18 @@ func (stream *streamImpl) Read() (interface{}, error) {
 	}
 
 	bytes := make([]byte, length)
-	var read uint32 = 0
-	for read < length {
-		count, err := stream.chanout.Read(bytes[read:])
-		read += uint32(count)
-		if err != nil {
-			return nil, err
-		}
+	_, err = io.ReadFull(stream.chanout, bytes)
+	if err != nil {
+		return nil, err
 	}
 
 	var value interface{}
 	err = json.Unmarshal(bytes, &value)
 
 	return value, err
+}
+
+func (stream *streamImpl) Close() {
+	stream.chanin.Close()
+	stream.chanout.Close()
 }
