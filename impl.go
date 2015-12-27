@@ -15,7 +15,9 @@ const (
 
 var (
 	PythonBinary string = "python2.7"
-	defaultOpts  PyOpts
+	defaultOpts         = PyOpts{
+		PythonBinary: PythonBinary,
+	}
 )
 
 type response struct {
@@ -47,16 +49,24 @@ type pygoImpl struct {
 }
 
 type PyOpts struct {
-	PythonPath string
-	Env        []string
+	PythonBinary string
+	PythonPath   string
+	Env          []string
 }
 
+func lookPath(binary string) (string, error) {
+	if binary == "" {
+		binary = PythonBinary
+	}
+
+	return exec.LookPath(binary)
+}
 func NewPy(module string, opts *PyOpts) (Pygo, error) {
 	if opts == nil {
 		opts = &defaultOpts
 	}
 
-	path, err := exec.LookPath(PythonBinary)
+	path, err := lookPath(opts.PythonBinary)
 
 	if err != nil {
 		return nil, err
